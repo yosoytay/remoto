@@ -179,3 +179,23 @@ button:disabled { opacity: 0.55; cursor: default; }
   resize: none;
   font-size: 16px;
 }
+
+/* El panel de archivos: se abre sobre la pantalla de la PC, del lado derecho. */
+.panel {
+  position: fixed;
+  top: calc(max(6px, env(safe-area-inset-top)) + 48px);
+  right: max(8px, env(safe-area-inset-right));
+  width: min(360px, calc(100vw - 16px));
+  max-height: calc(100vh - 72px);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+  background: var(--barra);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+.panel header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.panel h2 { margin: 16px 0 4px; font-size: 0.95rem; }
+.panel .nota { margin: 8px 0; }
+.panel .aviso:empty { display: none; }
+.panel .destino { font-weight: 400; font-size: 0.9rem; overflow-wrap: anywhere; }

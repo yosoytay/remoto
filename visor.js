@@ -2,7 +2,7 @@
 // Lo usa app.js: le pasa lo que llega por el canal directo y una función para mandar.
 const SIN_VIDEO = 'Este navegador no puede mostrar el video de la otra PC. Probá con Chrome al día.';
 
-export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso }) {
+export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, alArchivo, antesDePegar }) {
   const ctx = lienzo.getContext('2d', { alpha: false, desynchronized: true });
   let decodificador = null;
   let esperaCuadroCompleto = true;
@@ -58,7 +58,7 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso }
 
   // Lo que llega en binario son trozos de un cuadro: adelante, un 1 si sigue otro trozo y un 0 si es el último.
   // El cuadro armado trae 1 byte de clase (1 configuración, 2 cuadro completo, 3 cuadro de cambios), 4 de marca de
-  // tiempo en milisegundos y después los datos de H.264.
+  // tiempo en milisegundos y después los datos de H.264. La clase 4 es un trozo de un archivo que se está bajando.
   function alBinario(datos) {
     const trozo = new Uint8Array(datos);
     if (trozo.length < 2) return;
@@ -75,6 +75,7 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso }
     if (cuadro.length < 6) return;
     const clase = cuadro[0];
     const carga = cuadro.subarray(5);
+    if (clase === 4) { alArchivo(carga); return; }
     if (clase === 1) { prepararDecodificador(carga); return; }
     if (!decodificador || decodificador.state !== 'configured') return;
     if (esperaCuadroCompleto && clase !== 2) return;
@@ -400,9 +401,26 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso }
     return !(ev.ctrlKey || ev.altKey || ev.metaKey);
   }
 
+  // Pegar: primero viaja lo copiado en este equipo y después el Ctrl+V, así allá se pega lo de acá.
+  // Si mientras tanto se soltó el Ctrl, se lo aprieta y se lo suelta para que no salga una «v» suelta.
+  let pegando = false;
+  async function pegarAlla() {
+    if (pegando) return;
+    pegando = true;
+    try { await antesDePegar(); } catch {} finally { pegando = false; }
+    const conCtrl = bajadas.has('ControlLeft') || bajadas.has('ControlRight');
+    if (!conCtrl) enviar({ t: 'k', vk: 0xa2, d: 1, e: 0 });
+    tocarTecla('KeyV');
+    if (!conCtrl) enviar({ t: 'k', vk: 0xa2, d: 0, e: 0 });
+  }
+
   lienzo.addEventListener('keydown', (ev) => {
     ev.preventDefault();
     if (ev.isComposing || ev.key === 'Dead' || ev.key === 'Process' || ev.key === 'Unidentified') return;
+    if (ev.code === 'KeyV' && ev.ctrlKey && !ev.altKey && !ev.shiftKey && !ev.metaKey) {
+      if (!ev.repeat) { igualarModificadores(ev); pegarAlla(); }
+      return;
+    }
     if (ev.key === 'AltGraph') { subirTecla('ControlLeft'); return; }
     if (esModificador.has(ev.code)) { bajarTecla(ev.code); return; }
     igualarModificadores(ev);
@@ -516,7 +534,7 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso }
   }
 
   return {
-    alBinario, alTexto, empezar, terminar, soltarTodo, abrirTeclado,
+    alBinario, alTexto, empezar, terminar, soltarTodo, abrirTeclado, pegarAlla,
     estado: () => ({ hayVideo, conEntrada, conFoco: document.activeElement === lienzo, zoom, ancho: lienzo.width, alto: lienzo.height, ...medidas }),
   };
 }

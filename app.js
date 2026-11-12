@@ -260,7 +260,8 @@ async function conectar(destino, pin, reintento = 0) {
     else if (m.t === 'aviso') { s.ultimoAviso = m.texto; if (!visor.estado().hayVideo) decir($('avisoMirando'), m.texto); }
     else if (m.t === 'chau') s.chau = m.motivo;
     else if (m.t === 'inactividad') { if (esperaInactividad) { esperaInactividad(m.ms); esperaInactividad = null; } }
-    else visor.alTexto(m);
+    else if (m.t === 'porta') alPortapapelesDeAlla(m.c);
+    else if (!alMensajeDeArchivos(m)) visor.alTexto(m);
   };
   try {
     await pc.setLocalDescription(await pc.createOffer());
@@ -312,6 +313,8 @@ async function conectar(destino, pin, reintento = 0) {
 function alCerrarse(s) {
   if (sesion !== s) return;
   sesion = null;
+  soltarArchivos();
+  portaPendiente = null;
   try { s.pc.close(); } catch {}
   olvidarPinEnUnRato();
   const terminar = (texto, mal) => { visor.terminar(); irALaLista(texto, mal); };
@@ -361,7 +364,169 @@ const visor = crearVisor({
   lienzo: $('pantalla'), escena: $('escena'), campo: $('campo'), enviar,
   alCambiar: pintarEstado,
   alAviso: (texto) => decir($('avisoMirando'), texto, !!texto),
+  alArchivo: (trozo) => alTrozoDeArchivo(trozo),
+  antesDePegar: () => mandarLoCopiado(),
 });
+
+// ---------- Portapapeles (solo texto) ----------
+// Lo que se copia en la PC llega solo al portapapeles de este equipo. Lo copiado acá viaja al pegar (Ctrl+V o el botón).
+// Solo pasa mientras se está mirando esa PC, y no queda anotado en ningún lado.
+const LARGO_DEL_PORTAPAPELES = 50000;
+let portaPendiente = null;
+
+function ponerLoPendiente() {
+  if (portaPendiente === null || !navigator.clipboard) return;
+  const texto = portaPendiente;
+  navigator.clipboard.writeText(texto).then(() => { if (portaPendiente === texto) portaPendiente = null; }, () => {});
+}
+
+function alPortapapelesDeAlla(texto) {
+  if (typeof texto !== 'string' || !texto || texto.length > LARGO_DEL_PORTAPAPELES) return;
+  portaPendiente = texto;
+  ponerLoPendiente();
+}
+// El navegador solo deja escribir el portapapeles con la página en uso: si no pudo, se reintenta al primer toque.
+document.addEventListener('pointerdown', ponerLoPendiente, true);
+
+async function mandarLoCopiado() {
+  if (!sesion || !navigator.clipboard || !navigator.clipboard.readText) return;
+  let texto = '';
+  try { texto = await navigator.clipboard.readText(); } catch { return; }   // sin permiso: allá se pega lo que allá hubiera
+  if (!texto) return;
+  if (texto.length > LARGO_DEL_PORTAPAPELES) { decir($('avisoMirando'), 'Lo copiado es demasiado largo para pasarlo.', true); setTimeout(() => decir($('avisoMirando'), ''), 4000); return; }
+  enviar({ t: 'porta', c: texto });
+}
+
+$('pegar').addEventListener('click', () => { visor.pegarAlla(); $('pantalla').focus({ preventScroll: true }); });
+
+// ---------- Archivos ----------
+// Mandar: el archivo viaja en trozos y la PC confirma cuánto le llegó; nunca se manda más de 1 MB sin confirmar.
+// Traer: lo mismo al revés. Un archivo por vez en cada sentido.
+const TROZO_DE_ARCHIVO = 32000;
+const VENTANA = 1024 * 1024;
+let subida = null;   // { archivo, canal, enviado, confirmado, aceptada, ocupado }
+let bajada = null;   // { nombre, tam, partes, recibido, avisado }
+
+const tamano = (n) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : n < 1024 ** 3 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${(n / 1024 ** 3).toFixed(2)} GB`);
+const avisarArchivos = (texto, malo = false) => decir($('avisoArchivos'), texto, malo);
+const porciento = (parte, total) => (total ? Math.floor(parte * 100 / total) : 100);
+
+function abrirArchivos() {
+  $('panelArchivos').hidden = false;
+  enviar({ t: 'archivos' });
+}
+
+function soltarArchivos() {
+  subida = null;
+  bajada = null;
+  $('panelArchivos').hidden = true;
+  avisarArchivos('');
+  $('listaArchivos').textContent = '';
+}
+
+function mandarArchivo(archivo) {
+  if (!sesion || !archivo) return;
+  $('panelArchivos').hidden = false;
+  if (subida) { avisarArchivos('Esperá a que termine el que se está mandando.', true); return; }
+  subida = { archivo, canal: sesion.canal, enviado: 0, confirmado: 0, aceptada: false, ocupado: false };
+  avisarArchivos(`Mandando «${archivo.name}» (${tamano(archivo.size)})…`);
+  enviar({ t: 'sube', n: archivo.name, tam: archivo.size });
+}
+
+async function seguirSubida() {
+  const s = subida;
+  if (!s || !s.aceptada || s.ocupado) return;
+  s.ocupado = true;
+  try {
+    while (subida === s && s.enviado < s.archivo.size && s.enviado - s.confirmado < VENTANA && s.canal.readyState === 'open') {
+      if (s.canal.bufferedAmount > VENTANA) { await new Promise((ok) => setTimeout(ok, 40)); continue; }
+      const trozo = await s.archivo.slice(s.enviado, s.enviado + TROZO_DE_ARCHIVO).arrayBuffer();
+      if (subida !== s) return;
+      s.canal.send(trozo);
+      s.enviado += trozo.byteLength;
+    }
+  } catch {
+    if (subida === s) { subida = null; enviar({ t: 'sube-cancelar' }); avisarArchivos('No se pudo leer el archivo en este equipo.', true); }
+  } finally { s.ocupado = false; }
+}
+
+function alTrozoDeArchivo(trozo) {
+  const b = bajada;
+  if (!b) return;
+  b.partes.push(trozo.slice());
+  b.recibido += trozo.length;
+  if (b.recibido - b.avisado >= 256 * 1024) {
+    b.avisado = b.recibido;
+    enviar({ t: 'baja-va', n: b.recibido });
+    avisarArchivos(`Bajando «${b.nombre}»: ${porciento(b.recibido, b.tam)} %`);
+  }
+}
+
+function guardarLoBajado(b) {
+  const enlace = document.createElement('a');
+  enlace.href = URL.createObjectURL(new Blob(b.partes));
+  enlace.download = b.nombre;
+  document.body.append(enlace);
+  enlace.click();
+  enlace.remove();
+  setTimeout(() => URL.revokeObjectURL(enlace.href), 60000);
+}
+
+function pintarParaLlevar(lista) {
+  const caja = $('listaArchivos');
+  caja.textContent = '';
+  if (!lista.length) { caja.textContent = 'No hay nada para llevar.'; return; }
+  for (const a of lista) {
+    if (!a || typeof a.n !== 'string') continue;
+    const boton = document.createElement('button');
+    boton.type = 'button';
+    boton.className = 'destino';
+    boton.textContent = `${a.n} · ${tamano(Number(a.tam) || 0)}`;
+    boton.addEventListener('click', () => {
+      if (bajada) { avisarArchivos('Esperá a que termine el que se está bajando.', true); return; }
+      avisarArchivos(`Pidiendo «${a.n}»…`);
+      enviar({ t: 'baja', n: a.n });
+    });
+    caja.append(boton);
+  }
+}
+
+// Devuelve true si el mensaje era de archivos.
+function alMensajeDeArchivos(m) {
+  switch (m.t) {
+    case 'archivos': if (Array.isArray(m.lista)) pintarParaLlevar(m.lista); return true;
+    case 'sube-si': if (subida) { subida.aceptada = true; seguirSubida(); } return true;
+    case 'sube-va':
+      if (subida && Number.isSafeInteger(m.n)) {
+        subida.confirmado = m.n;
+        avisarArchivos(`Mandando «${subida.archivo.name}»: ${porciento(m.n, subida.archivo.size)} %`);
+        seguirSubida();
+      }
+      return true;
+    case 'sube-listo': subida = null; avisarArchivos(`Listo: «${m.n}» quedó en «Recibidos» de esa PC.`); return true;
+    case 'sube-no': subida = null; avisarArchivos(m.texto || 'Esa PC no aceptó el archivo.', true); return true;
+    case 'baja-si': bajada = { nombre: String(m.n), tam: Number(m.tam) || 0, partes: [], recibido: 0, avisado: 0 }; avisarArchivos(`Bajando «${m.n}»…`); return true;
+    case 'baja-listo':
+      if (bajada) {
+        const b = bajada;
+        bajada = null;
+        if (b.recibido === b.tam) { guardarLoBajado(b); avisarArchivos(`Listo: «${b.nombre}» quedó en las descargas de este equipo.`); }
+        else avisarArchivos('El archivo llegó incompleto. Probá de nuevo.', true);
+      }
+      return true;
+    case 'baja-no': bajada = null; avisarArchivos(m.texto || 'No se pudo bajar.', true); return true;
+    default: return false;
+  }
+}
+
+$('archivos').addEventListener('click', () => { if ($('panelArchivos').hidden) abrirArchivos(); else $('panelArchivos').hidden = true; });
+$('cerrarArchivos').addEventListener('click', () => { $('panelArchivos').hidden = true; });
+$('actualizarArchivos').addEventListener('click', () => enviar({ t: 'archivos' }));
+$('mandarArchivo').addEventListener('click', () => $('elegirArchivo').click());
+$('elegirArchivo').addEventListener('change', () => { mandarArchivo($('elegirArchivo').files[0]); $('elegirArchivo').value = ''; });
+// En una PC también se puede arrastrar el archivo sobre la pantalla.
+$('escena').addEventListener('dragover', (ev) => ev.preventDefault());
+$('escena').addEventListener('drop', (ev) => { ev.preventDefault(); if (ev.dataTransfer && ev.dataTransfer.files.length) mandarArchivo(ev.dataTransfer.files[0]); });
 
 $('teclado').addEventListener('click', () => visor.abrirTeclado());
 $('salir').addEventListener('click', () => salir());

@@ -57,6 +57,8 @@
       <strong id="nombre" class="nombre"></strong>
       <span id="estado" class="estado"></span>
       <span id="medidas" class="medidas"></span>
+      <button id="pegar" type="button" class="boton" aria-label="Pegar" title="Pegar en la PC lo copiado en este equipo">📋</button>
+      <button id="archivos" type="button" class="boton" aria-label="Archivos" title="Archivos">📁</button>
       <button id="teclado" type="button" class="boton" aria-label="Teclado" title="Teclado">⌨</button>
       <button id="salir" type="button" class="boton" aria-label="Salir" title="Salir">✕</button>
     </header>
@@ -64,6 +66,17 @@
       <canvas id="pantalla" tabindex="0" aria-label="Pantalla de la PC"></canvas>
       <p id="avisoMirando" class="aviso sobre" role="status"></p>
     </div>
+    <section id="panelArchivos" class="panel" hidden>
+      <header><strong>Archivos</strong><button id="cerrarArchivos" type="button" class="boton" aria-label="Cerrar">✕</button></header>
+      <button id="mandarArchivo" type="button">Mandar un archivo a esta PC</button>
+      <input id="elegirArchivo" type="file" hidden>
+      <p class="nota">Llega a la carpeta «Archivos remotos\Recibidos», en el escritorio de esa PC.</p>
+      <p id="avisoArchivos" class="aviso" role="status"></p>
+      <h2>Para llevar</h2>
+      <p class="nota">Lo que dejes en «Archivos remotos\Para llevar» de esa PC aparece acá. Tocá uno para bajarlo.</p>
+      <div id="listaArchivos" class="destinos"></div>
+      <p class="pie"><button id="actualizarArchivos" type="button" class="enlace">Actualizar la lista</button></p>
+    </section>
     <textarea id="campo" class="campo" aria-hidden="true" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
   </div>
 
