@@ -1,0 +1,390 @@
+// app.js — la página de entrada: empareja este equipo con la casa, deja elegir la PC, pide el PIN y abre el camino
+// directo (una conexión de equipo a equipo, cifrada de punta a punta). No guarda claves a la vista: la llave del
+// equipo queda en el navegador de forma que ni esta misma página puede copiarla, y el PIN no se guarda nunca.
+import * as cripto from './cripto.js';
+import { pedir } from './presentador.js';
+import { crearVisor } from './visor.js';
+
+const SERVIDORES_STUN = ['stun:stun.l.google.com:19302', 'stun:stun.sipgate.net:3478', 'stun:stun.nextcloud.com:3478'];
+const MINUTOS_SIN_MIRAR = 5;   // pasado ese rato con la página fuera de la vista, se vuelve a pedir el PIN
+const $ = (id) => document.getElementById(id);
+
+// Esta página no se deja meter dentro de otra.
+if (window.top !== window.self) { document.documentElement.textContent = ''; throw new Error('No se muestra dentro de otra página.'); }
+
+class Aviso extends Error {
+  constructor(texto, motivo = '') { super(texto); this.motivo = motivo; }
+}
+
+// ---------- Lo que queda guardado en este navegador ----------
+function base() {
+  return new Promise((ok, mal) => {
+    const pedido = indexedDB.open('tayremotocontrol', 1);
+    pedido.onupgradeneeded = () => pedido.result.createObjectStore('cosas');
+    pedido.onsuccess = () => ok(pedido.result);
+    pedido.onerror = () => mal(pedido.error);
+  });
+}
+
+async function conLoGuardado(modo, hacer) {
+  const b = await base();
+  try {
+    return await new Promise((ok, mal) => {
+      const transaccion = b.transaction('cosas', modo);
+      const pedido = hacer(transaccion.objectStore('cosas'));
+      transaccion.oncomplete = () => ok(pedido.result);
+      transaccion.onerror = transaccion.onabort = () => mal(transaccion.error);
+    });
+  } finally { b.close(); }
+}
+const leer = (clave) => conLoGuardado('readonly', (s) => s.get(clave));
+const guardar = (clave, valor) => conLoGuardado('readwrite', (s) => s.put(valor, clave));
+const borrar = (clave) => conLoGuardado('readwrite', (s) => s.delete(clave));
+
+// ---------- Estado de la página ----------
+let datos = null;          // { casa, equipo, llave, destinos }: el emparejado de este equipo
+let sesion = null;         // la conexión abierta
+let elegido = null;        // la PC elegida mientras se pide el PIN
+let pinEnMemoria = null;   // solo mientras se usa: nunca se guarda
+let relojDelPin = 0;
+let ocultaDesde = 0;
+
+function mostrar(cual) {
+  for (const id of ['emparejar', 'lista', 'mirando', 'noSirve']) $(id).hidden = id !== cual;
+}
+
+function decir(elemento, texto, mal = false) {
+  elemento.textContent = texto;
+  if (mal) elemento.dataset.como = 'mal'; else delete elemento.dataset.como;
+}
+
+function recordarPin(pin) {
+  clearTimeout(relojDelPin);
+  pinEnMemoria = pin;
+}
+
+function olvidarPinEnUnRato() {
+  clearTimeout(relojDelPin);
+  relojDelPin = setTimeout(() => { if (!sesion) pinEnMemoria = null; }, 2 * 60000);
+}
+
+// Seis números o más, que no sean todos iguales ni una escalera. La casa comprueba lo mismo.
+function pinFlojo(pin) {
+  if (!/^\d{6,12}$/.test(pin)) return 'El PIN lleva 6 números o más.';
+  const d = [...pin].map(Number);
+  const flojo = d.every((x) => x === d[0])
+    || d.every((x, i) => i === 0 || x === (d[i - 1] + 1) % 10)
+    || d.every((x, i) => i === 0 || x === (d[i - 1] + 9) % 10);
+  return flojo ? 'Ese PIN es muy fácil de adivinar. Elegí otro.' : '';
+}
+
+// ---------- Hablar con la casa ----------
+async function pedirALaCasa(d, pedido) {
+  const id = cripto.nuevoId();
+  const sobre = await cripto.sellar(d.llave, { ...pedido, id, ts: Date.now() }, cripto.CONTEXTO.pedido(d.casa.id, d.equipo.id));
+  const texto = await pedir(d.casa.id, JSON.stringify({ v: 1, e: d.equipo.id, c: sobre }));
+  return cripto.abrir(d.llave, JSON.parse(texto).c, cripto.CONTEXTO.respuesta(d.casa.id, d.equipo.id, id));
+}
+
+function porQueNo(r) {
+  switch (r.motivo) {
+    case 'pin': return `El PIN no es ese. ${r.quedan === 1 ? 'Queda 1 intento' : `Quedan ${r.quedan} intentos`} antes de que este equipo quede dado de baja.`;
+    case 'baja': return 'Este equipo fue dado de baja. Hay que emparejarlo de nuevo, estando en casa.';
+    case 'reloj': return 'La hora de este equipo no coincide con la de casa. Corregila y probá de nuevo.';
+    case 'camino': return 'La casa no pudo armar la conexión. Probá de nuevo.';
+    case 'destino': return 'Esa PC ya no figura en casa.';
+    case 'pin-debil': return 'Ese PIN es muy fácil de adivinar. Elegí otro.';
+    default: return 'La casa no aceptó el pedido.';
+  }
+}
+
+// ---------- Emparejar ----------
+$('codigo').addEventListener('input', () => {
+  const limpio = $('codigo').value.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 10);
+  $('codigo').value = limpio.length > 5 ? `${limpio.slice(0, 5)}-${limpio.slice(5)}` : limpio;
+});
+
+$('formularioEmparejar').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const aviso = $('avisoEmparejar');
+  const boton = ev.target.querySelector('button');
+  const codigo = cripto.limpiarCodigo($('codigo').value);
+  const nombre = $('nombreDelEquipo').value.trim();
+  const pin = $('pinNuevo').value;
+  if (!codigo) { decir(aviso, 'El código tiene diez letras y números, como lo muestra la PC.', true); return; }
+  if (pinFlojo(pin)) { decir(aviso, pinFlojo(pin), true); return; }
+  if (pin !== $('pinRepetido').value) { decir(aviso, 'Los dos PIN no coinciden.', true); return; }
+  boton.disabled = true;
+  try {
+    decir(aviso, 'Buscando la casa…');
+    const { sala, clave } = await cripto.delCodigo(codigo);
+    const par = await cripto.nuevoPar();
+    const publica = await cripto.publicaDe(par);
+    const id = cripto.nuevoId();
+    const sobre = await cripto.sellar(clave, { t: 'emparejar', id, ts: Date.now(), pub: cripto.aTexto64(publica), nombre }, cripto.CONTEXTO.emparejar(sala));
+    let texto;
+    try { texto = await pedir(sala, JSON.stringify({ v: 1, c: sobre })); } catch {
+      throw new Aviso('La casa no contestó. Fijate que el código sea el que muestra la PC y que no haya vencido.');
+    }
+    let r;
+    try { r = await cripto.abrir(clave, JSON.parse(texto).c, cripto.CONTEXTO.emparejado(sala, id)); } catch {
+      throw new Aviso('La respuesta no vino de la casa. No se emparejó nada: pedí un código nuevo.');
+    }
+    const publicaDeLaCasa = cripto.deTexto64(r.pub);
+    const llave = await cripto.llaveDelEquipo(par, publicaDeLaCasa, publica, publicaDeLaCasa);
+    await cripto.abrir(llave, r.prueba, cripto.CONTEXTO.pedido(r.casa.id, r.equipo));   // comprueba que los dos tienen la misma llave
+    const nuevo = { casa: r.casa, equipo: { id: r.equipo, nombre: r.nombre }, llave, destinos: [] };
+    decir(aviso, 'Guardando el PIN…');
+    const c = await pedirALaCasa(nuevo, { t: 'confirmar', pin });
+    if (c.t !== 'listo') throw new Aviso(porQueNo(c));
+    nuevo.destinos = c.destinos;
+    await guardar('emparejado', nuevo);
+    datos = nuevo;
+    recordarPin(pin);
+    olvidarPinEnUnRato();
+    ev.target.reset();
+    decir(aviso, '');
+    irALaLista(`Listo: este equipo quedó emparejado como «${nuevo.equipo.nombre}».`);
+  } catch (error) {
+    decir(aviso, error instanceof Aviso ? error.message : 'No se pudo emparejar. Probá de nuevo con un código nuevo.', true);
+  } finally {
+    boton.disabled = false;
+  }
+});
+
+// ---------- Elegir la PC ----------
+function irALaLista(texto = '', mal = false) {
+  document.title = 'TayRemotoControl';
+  elegido = null;
+  $('formularioPin').hidden = true;
+  $('saludo').textContent = `Este equipo: «${datos.equipo.nombre}».`;
+  const lista = $('destinos');
+  lista.textContent = '';
+  for (const destino of datos.destinos) {
+    const boton = document.createElement('button');
+    boton.type = 'button';
+    boton.className = 'destino';
+    boton.textContent = destino.nombre;
+    boton.setAttribute('aria-pressed', 'false');
+    boton.addEventListener('click', () => elegir(destino, boton));
+    lista.append(boton);
+  }
+  mostrar('lista');
+  decir($('avisoLista'), texto, mal);
+}
+
+function elegir(destino, boton) {
+  if (sesion) return;
+  for (const b of $('destinos').children) b.setAttribute('aria-pressed', String(b === boton));
+  elegido = destino;
+  if (pinEnMemoria) { conectar(destino, pinEnMemoria); return; }
+  $('paraQuien').textContent = `PIN para entrar a la ${destino.nombre}`;
+  $('formularioPin').hidden = false;
+  $('pin').value = '';
+  $('pin').focus();
+  decir($('avisoLista'), '');
+}
+
+$('formularioPin').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  if (elegido) conectar(elegido, $('pin').value);
+});
+
+$('quitar').addEventListener('click', async () => {
+  if (!window.confirm('¿Quitar el emparejado de este equipo? Para volver a usarlo habrá que emparejarlo de nuevo, estando en casa.')) return;
+  await borrar('emparejado');
+  window.location.reload();
+});
+
+function ocupar(si) {
+  for (const b of document.querySelectorAll('#lista button')) b.disabled = si;
+}
+
+// ---------- El camino directo ----------
+function candidatosListos(pc, ms) {
+  if (pc.iceGatheringState === 'complete') return Promise.resolve();
+  return new Promise((ok) => {
+    const reloj = setTimeout(ok, ms);
+    pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(reloj); ok(); } });
+  });
+}
+
+// Cómo sale a internet la red de acá, mirando por dónde la ven los servidores que dicen «desde afuera te veo así».
+// Si la ven por una sola puerta, el camino directo se puede abrir. Si la ven por varias, la red es «estricta».
+function redDeAca(sdp) {
+  const salidas = new Map();
+  for (const linea of String(sdp).split('\n')) {
+    const m = /^a=candidate:\S+ \d+ udp \d+ (\S+) (\d+) typ srflx/i.exec(linea.trim());
+    if (!m || m[1].includes(':')) continue;
+    if (!salidas.has(m[1])) salidas.set(m[1], new Set());
+    salidas.get(m[1]).add(m[2]);
+  }
+  if (!salidas.size) return 'cerrada';
+  return [...salidas.values()].some((puertos) => puertos.size > 1) ? 'estricta' : 'normal';
+}
+
+function porLaRed(pc) {
+  const red = redDeAca(pc.localDescription ? pc.localDescription.sdp : '');
+  if (red === 'estricta') return 'Desde esta red no se puede abrir el camino directo: cambia de puerta según con quién habla (red «estricta»). Acá haría falta el puente.';
+  if (red === 'cerrada') return 'Esta red no deja salir por el camino directo: solo permite navegar. Acá haría falta el puente.';
+  return 'No se pudo abrir el camino directo, aunque esta red parece permitirlo. Probá de nuevo.';
+}
+
+async function conectar(destino, pin, reintento = 0) {
+  const avisar = (texto, mal) => decir(reintento ? $('avisoMirando') : $('avisoLista'), texto, mal);
+  ocupar(true);
+  avisar('Buscando la casa…');
+  const pc = new RTCPeerConnection({ iceServers: SERVIDORES_STUN.map((urls) => ({ urls })) });
+  const canal = pc.createDataChannel('trc', { ordered: true });
+  canal.binaryType = 'arraybuffer';
+  const s = { pc, canal, destino, reintento, chau: null, ultimoAviso: '', saliendo: false };
+  canal.onmessage = (ev) => {
+    if (typeof ev.data !== 'string') { visor.alBinario(ev.data); return; }
+    let m;
+    try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.t === 'servidor') { $('nombre').textContent = m.equipo; document.title = `${m.equipo} · TayRemotoControl`; }
+    else if (m.t === 'aviso') { s.ultimoAviso = m.texto; if (!visor.estado().hayVideo) decir($('avisoMirando'), m.texto); }
+    else if (m.t === 'chau') s.chau = m.motivo;
+    else if (m.t === 'inactividad') { if (esperaInactividad) { esperaInactividad(m.ms); esperaInactividad = null; } }
+    else visor.alTexto(m);
+  };
+  try {
+    await pc.setLocalDescription(await pc.createOffer());
+    await candidatosListos(pc, 2500);
+    let r;
+    try { r = await pedirALaCasa(datos, { t: 'entrar', pin, destino: destino.id, sdp: pc.localDescription.sdp }); } catch {
+      throw new Aviso('La casa no contesta. Puede que la PC esté apagada o sin internet, o que acá no haya señal.');
+    }
+    if (Array.isArray(r.destinos)) { datos.destinos = r.destinos; guardar('emparejado', datos).catch(() => {}); }
+    if (r.t !== 'pasar') throw new Aviso(porQueNo(r), r.motivo);
+    recordarPin(pin);
+    avisar('Abriendo el camino directo…');
+    await pc.setRemoteDescription({ type: 'answer', sdp: r.sdp });
+    await new Promise((ok, mal) => {
+      const plazo = setTimeout(() => mal(new Aviso(porLaRed(pc))), 20000);
+      canal.onopen = () => { clearTimeout(plazo); ok(); };
+      pc.addEventListener('iceconnectionstatechange', () => {
+        if (pc.iceConnectionState === 'failed') { clearTimeout(plazo); mal(new Aviso(porLaRed(pc))); }
+      });
+    });
+  } catch (error) {
+    try { pc.close(); } catch {}
+    ocupar(false);
+    const texto = error instanceof Aviso ? error.message : 'No se pudo conectar. Probá de nuevo.';
+    if (error.motivo === 'pin' || error.motivo === 'baja') pinEnMemoria = null;
+    if (reintento) visor.terminar();
+    irALaLista(texto, true);
+    if (error.motivo === 'pin') {
+      // Se vuelve a pedir el PIN para la misma PC.
+      elegido = destino;
+      $('paraQuien').textContent = `PIN para entrar a la ${destino.nombre}`;
+      $('formularioPin').hidden = false;
+      $('pin').value = '';
+      $('pin').focus();
+    }
+    return;
+  }
+  // Abierto: desde acá, lo que viaja va directo entre este equipo y la casa.
+  ocupar(false);
+  sesion = s;
+  canal.onclose = () => alCerrarse(s);
+  $('nombre').textContent = destino.nombre;
+  decir($('avisoMirando'), 'Conectando con la PC…');
+  visor.empezar();
+  mostrar('mirando');
+  pintarEstado();
+}
+
+function alCerrarse(s) {
+  if (sesion !== s) return;
+  sesion = null;
+  try { s.pc.close(); } catch {}
+  olvidarPinEnUnRato();
+  const terminar = (texto, mal) => { visor.terminar(); irALaLista(texto, mal); };
+  if (s.saliendo) { terminar(s.porQue || ''); return; }
+  if (s.chau === 'otro') { terminar('Otro equipo tomó la pantalla de esa PC.'); return; }
+  if (s.chau === 'baja') { pinEnMemoria = null; terminar('Este equipo fue dado de baja. Hay que emparejarlo de nuevo, estando en casa.', true); return; }
+  if (s.chau === 'apagado') { terminar('El portero de casa se apagó.', true); return; }
+  if (s.chau === 'agente') { terminar(s.ultimoAviso || 'Se cortó la conexión con esa PC.', true); return; }
+  // Un corte sin aviso (cambio de red, un rato sin señal): se reintenta solo, hasta tres veces.
+  if (s.reintento < 3 && pinEnMemoria && document.visibilityState === 'visible') {
+    visor.terminar();
+    decir($('avisoMirando'), 'Se cortó. Reconectando…');
+    pintarEstado();
+    setTimeout(() => conectar(s.destino, pinEnMemoria, s.reintento + 1), 1500);
+    return;
+  }
+  terminar('Se cortó la conexión.', true);
+}
+
+function salir(porQue = '') {
+  if (!sesion) return;
+  const s = sesion;
+  s.saliendo = true;
+  s.porQue = porQue;
+  visor.soltarTodo();
+  try { s.canal.close(); } catch {}
+  setTimeout(() => alCerrarse(s), 300);   // por si el aviso de cierre no llega
+}
+
+// ---------- La pantalla ----------
+const enviar = (objeto) => {
+  if (sesion && sesion.canal.readyState === 'open') { try { sesion.canal.send(JSON.stringify(objeto)); } catch {} }
+};
+
+function pintarEstado() {
+  const cartel = $('estado');
+  const e = visor.estado();
+  if (!sesion) { cartel.textContent = 'Sin conexión'; cartel.dataset.como = 'mal'; $('medidas').textContent = ''; return; }
+  if (!e.hayVideo) { cartel.textContent = 'Conectando…'; delete cartel.dataset.como; $('medidas').textContent = ''; return; }
+  cartel.dataset.como = 'bien';
+  cartel.textContent = e.conEntrada ? 'Conectado' : 'Conectado · solo mirar';
+  const vuelta = e.idaYVuelta === null ? '' : `ida y vuelta ${e.idaYVuelta} ms`;
+  $('medidas').textContent = window.innerWidth < 560 ? vuelta.replace('ida y vuelta ', '') : [`${e.cuadros} cuadros/s`, `${e.kbit} kbit/s`, vuelta].filter(Boolean).join(' · ');
+}
+
+const visor = crearVisor({
+  lienzo: $('pantalla'), escena: $('escena'), campo: $('campo'), enviar,
+  alCambiar: pintarEstado,
+  alAviso: (texto) => decir($('avisoMirando'), texto, !!texto),
+});
+
+$('teclado').addEventListener('click', () => visor.abrirTeclado());
+$('salir').addEventListener('click', () => salir());
+
+// Si la página queda un rato fuera de la vista, se cierra la sesión y se vuelve a pedir el PIN.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { ocultaDesde = Date.now(); return; }
+  const rato = ocultaDesde ? Date.now() - ocultaDesde : 0;
+  ocultaDesde = 0;
+  if (rato < MINUTOS_SIN_MIRAR * 60000) return;
+  pinEnMemoria = null;
+  if (sesion) salir('La sesión se cerró porque este equipo quedó un rato sin mirarla. Entrá de nuevo con tu PIN.');
+});
+
+// Para probar desde la consola. «inactividad» dice hace cuánto que nadie toca la PC que se está mirando:
+// se mira antes de mandarle mouse o teclado en una prueba.
+let esperaInactividad = null;
+window.trc = {
+  estado: () => ({ emparejado: !!datos, conSesion: !!sesion, ...visor.estado() }),
+  red: () => (sesion ? redDeAca(sesion.pc.localDescription.sdp) : null),
+  inactividad: () => new Promise((ok) => { esperaInactividad = ok; enviar({ t: 'inactividad' }); setTimeout(() => ok(undefined), 3000); }),
+};
+
+// ---------- Arranque ----------
+async function arrancar() {
+  if (!window.isSecureContext || !('VideoDecoder' in window) || !('RTCPeerConnection' in window) || !window.indexedDB || !window.crypto || !window.crypto.subtle) {
+    decir($('noSirve'), 'Este navegador no sirve para TayRemotoControl. Probá con Chrome al día.', true);
+    mostrar('noSirve');
+    return;
+  }
+  try { datos = await leer('emparejado'); } catch {
+    decir($('noSirve'), 'Este navegador no deja guardar la llave del equipo (puede ser una ventana privada). Abrí la página en una ventana común.', true);
+    mostrar('noSirve');
+    return;
+  }
+  if (datos) { irALaLista(); return; }
+  $('nombreDelEquipo').value = /Android/i.test(navigator.userAgent) ? 'Celular' : /Windows/i.test(navigator.userAgent) ? 'Notebook' : 'Equipo';
+  mostrar('emparejar');
+}
+arrancar();

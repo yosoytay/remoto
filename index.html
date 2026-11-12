@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; manifest-src 'self'; connect-src wss://tracker.webtorrent.dev wss://tracker.files.fm:7073 wss://tracker.novage.com.ua; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#0f1215">
+  <title>TayRemotoControl</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icono-192.png">
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <!-- Emparejar: se ve solo en un equipo que todavía no está emparejado -->
+  <main id="emparejar" class="hoja" hidden>
+    <h1>TayRemotoControl</h1>
+    <p>Para usar este equipo hay que emparejarlo una vez, estando en casa. Escribí acá el código que muestra la PC de casa.</p>
+    <form id="formularioEmparejar" autocomplete="off">
+      <label>Código de la PC
+        <input id="codigo" inputmode="text" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="XXXXX-XXXXX" maxlength="14" required>
+      </label>
+      <label>Nombre de este equipo
+        <input id="nombreDelEquipo" autocorrect="off" spellcheck="false" maxlength="30" required>
+      </label>
+      <label>Elegí un PIN (6 números o más)
+        <input id="pinNuevo" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" minlength="6" maxlength="12" required>
+      </label>
+      <label>Repetí el PIN
+        <input id="pinRepetido" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" minlength="6" maxlength="12" required>
+      </label>
+      <p class="nota">El PIN se pide cada vez que entrás. Si se escribe mal cinco veces seguidas, este equipo queda dado de baja y hay que emparejarlo de nuevo.</p>
+      <button type="submit">Emparejar</button>
+    </form>
+    <p id="avisoEmparejar" class="aviso" role="status"></p>
+  </main>
+
+  <!-- Elegir la PC y escribir el PIN -->
+  <main id="lista" class="hoja" hidden>
+    <h1>TayRemotoControl</h1>
+    <p id="saludo" class="nota"></p>
+    <div id="destinos" class="destinos"></div>
+    <form id="formularioPin" autocomplete="off" hidden>
+      <label><span id="paraQuien">PIN</span>
+        <input id="pin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" minlength="6" maxlength="12" required>
+      </label>
+      <button type="submit">Entrar</button>
+    </form>
+    <p id="avisoLista" class="aviso" role="status"></p>
+    <p class="pie"><button id="quitar" type="button" class="enlace">Quitar el emparejado de este equipo</button></p>
+  </main>
+
+  <!-- La pantalla de la PC -->
+  <div id="mirando" class="mirando" hidden>
+    <header class="barra">
+      <strong id="nombre" class="nombre"></strong>
+      <span id="estado" class="estado"></span>
+      <span id="medidas" class="medidas"></span>
+      <button id="teclado" type="button" class="boton" aria-label="Teclado" title="Teclado">⌨</button>
+      <button id="salir" type="button" class="boton" aria-label="Salir" title="Salir">✕</button>
+    </header>
+    <div id="escena" class="escena">
+      <canvas id="pantalla" tabindex="0" aria-label="Pantalla de la PC"></canvas>
+      <p id="avisoMirando" class="aviso sobre" role="status"></p>
+    </div>
+    <textarea id="campo" class="campo" aria-hidden="true" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+  </div>
+
+  <p id="noSirve" class="hoja aviso" hidden></p>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
