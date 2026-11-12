@@ -229,3 +229,7 @@ button:disabled { opacity: 0.55; cursor: default; }
 }
 .tira button[aria-pressed="true"], #atajos[aria-pressed="true"] { border-color: var(--bien); color: var(--bien); }
 #atajos { font-size: 0.8rem; }
+
+/* En una tablet o un celular la tira muestra sus botones (Atrás, Inicio…) y no los atajos de Windows; en una PC, al revés. */
+.tira[data-tipo="android"] [data-atajo], .tira[data-tipo="android"] [data-fijar] { display: none; }
+.tira:not([data-tipo="android"]) [data-global] { display: none; }

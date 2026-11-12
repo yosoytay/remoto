@@ -256,7 +256,7 @@ async function conectar(destino, pin, reintento = 0) {
     if (typeof ev.data !== 'string') { visor.alBinario(ev.data); return; }
     let m;
     try { m = JSON.parse(ev.data); } catch { return; }
-    if (m.t === 'servidor') { $('nombre').textContent = m.equipo; document.title = `${m.equipo} · TayRemotoControl`; }
+    if (m.t === 'servidor') { $('nombre').textContent = m.equipo; document.title = `${m.equipo} · TayRemotoControl`; acomodarSegunElTipo(m.tipo === 'android'); }
     else if (m.t === 'aviso') { s.ultimoAviso = m.texto; if (!visor.estado().hayVideo) decir($('avisoMirando'), m.texto); }
     else if (m.t === 'chau') s.chau = m.motivo;
     else if (m.t === 'inactividad') { if (esperaInactividad) { esperaInactividad(m.ms); esperaInactividad = null; } }
@@ -313,6 +313,7 @@ async function conectar(destino, pin, reintento = 0) {
 function alCerrarse(s) {
   if (sesion !== s) return;
   sesion = null;
+  acomodarSegunElTipo(false);
   soltarArchivos();
   portaPendiente = null;
   try { s.pc.close(); } catch {}
@@ -534,6 +535,14 @@ $('escena').addEventListener('dragover', (ev) => ev.preventDefault());
 $('escena').addEventListener('drop', (ev) => { ev.preventDefault(); if (ev.dataTransfer && ev.dataTransfer.files.length) mandarArchivo(ev.dataTransfer.files[0]); });
 
 // ---------- Atajos de teclado ----------
+// Una tablet o un celular no tiene teclado, portapapeles ni carpetas para archivos: esos botones se esconden, y la tira
+// queda a la vista con Atrás, Inicio y Recientes, que es lo que ahí hace falta.
+function acomodarSegunElTipo(esAndroid) {
+  const tira = $('tiraDeAtajos');
+  tira.dataset.tipo = esAndroid ? 'android' : 'pc';
+  for (const id of ['pegar', 'archivos', 'teclado']) $(id).hidden = esAndroid;
+  if (esAndroid) { tira.hidden = false; $('atajos').setAttribute('aria-pressed', 'true'); $('panelArchivos').hidden = true; }
+}
 $('atajos').addEventListener('click', () => {
   const tira = $('tiraDeAtajos');
   tira.hidden = !tira.hidden;
@@ -544,7 +553,8 @@ $('tiraDeAtajos').addEventListener('mousedown', (ev) => ev.preventDefault());
 $('tiraDeAtajos').addEventListener('click', (ev) => {
   const boton = ev.target.closest('button');
   if (!boton || !sesion) return;
-  if (boton.dataset.atajo) visor.atajo(boton.dataset.atajo);
+  if (boton.dataset.global) enviar({ t: 'g', a: boton.dataset.global });
+  else if (boton.dataset.atajo) visor.atajo(boton.dataset.atajo);
   else if (boton.dataset.fijar) visor.fijar(boton.dataset.fijar.split(' '));
 });
 
