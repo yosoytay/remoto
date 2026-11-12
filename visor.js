@@ -419,7 +419,7 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
     for (const codigo of [...codigos].reverse()) { const tecla = TECLAS[codigo]; enviar({ t: 'k', vk: tecla[0], d: 0, e: tecla[1] }); }
   }
   const ATAJOS = {
-    tab: ['Tab'], esc: ['Escape'], alttab: ['AltLeft', 'Tab'], escritorio: ['MetaLeft', 'KeyD'], tareas: ['ControlLeft', 'ShiftLeft', 'Escape'],
+    tab: ['Tab'], esc: ['Escape'], alttab: ['AltLeft', 'Tab'], escritorio: ['MetaLeft', 'KeyD'], recorte: ['MetaLeft', 'ShiftLeft', 'KeyS'], tareas: ['ControlLeft', 'ShiftLeft', 'Escape'],
   };
   function atajo(nombre) {
     const codigos = ATAJOS[nombre];

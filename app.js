@@ -533,25 +533,6 @@ $('elegirArchivo').addEventListener('change', () => { mandarArchivo($('elegirArc
 $('escena').addEventListener('dragover', (ev) => ev.preventDefault());
 $('escena').addEventListener('drop', (ev) => { ev.preventDefault(); if (ev.dataTransfer && ev.dataTransfer.files.length) mandarArchivo(ev.dataTransfer.files[0]); });
 
-// ---------- Captura ----------
-// Guarda en este equipo, como imagen, lo que se está viendo de la PC. No pasa por la PC: sale de lo que ya llegó.
-function capturarPantalla() {
-  if (!sesion || !visor.estado().hayVideo) return;
-  const nombre = sesion.destino.nombre;
-  $('pantalla').toBlob((imagen) => {
-    if (!imagen) { decir($('avisoMirando'), 'No se pudo hacer la captura.', true); return; }
-    const d = new Date();
-    const dos = (n) => String(n).padStart(2, '0');
-    const enlace = document.createElement('a');
-    enlace.href = URL.createObjectURL(imagen);
-    enlace.download = `${nombre} ${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())} ${dos(d.getHours())}.${dos(d.getMinutes())}.${dos(d.getSeconds())}.png`;
-    document.body.append(enlace);
-    enlace.click();
-    enlace.remove();
-    setTimeout(() => URL.revokeObjectURL(enlace.href), 60000);
-  }, 'image/png');
-}
-
 // ---------- Atajos de teclado ----------
 $('atajos').addEventListener('click', () => {
   const tira = $('tiraDeAtajos');
@@ -563,7 +544,6 @@ $('tiraDeAtajos').addEventListener('mousedown', (ev) => ev.preventDefault());
 $('tiraDeAtajos').addEventListener('click', (ev) => {
   const boton = ev.target.closest('button');
   if (!boton || !sesion) return;
-  if (boton.id === 'capturar') { capturarPantalla(); return; }
   if (boton.dataset.atajo) visor.atajo(boton.dataset.atajo);
   else if (boton.dataset.fijar) visor.fijar(boton.dataset.fijar.split(' '));
 });
