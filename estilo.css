@@ -199,3 +199,33 @@ button:disabled { opacity: 0.55; cursor: default; }
 .panel .nota { margin: 8px 0; }
 .panel .aviso:empty { display: none; }
 .panel .destino { font-weight: 400; font-size: 0.9rem; overflow-wrap: anywhere; }
+
+/* La tira de atajos: teclas que el celular no tiene, y Ctrl y Shift que quedan apretadas hasta la próxima tecla. */
+.tira {
+  flex: none;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  /* Una sola línea: si no entran, se deslizan con el dedo de derecha a izquierda. */
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  touch-action: pan-x;
+  padding: 6px max(10px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left));
+  background: var(--barra);
+  border-bottom: 1px solid var(--borde);
+}
+.tira[hidden] { display: none; }
+.tira::-webkit-scrollbar { display: none; }
+.tira button {
+  flex: none;
+  white-space: nowrap;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  background: var(--fondo);
+  font-size: 0.85rem;
+}
+.tira button[aria-pressed="true"], #atajos[aria-pressed="true"] { border-color: var(--bien); color: var(--bien); }
+#atajos { font-size: 0.8rem; }

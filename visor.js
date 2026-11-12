@@ -280,6 +280,7 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
         mover(posicion(punto.x, punto.y), true);
         enviar({ t: 'b', n: 0, d: 1 });
         enviar({ t: 'b', n: 0, d: 0 });
+        soltarFijos();
       }
     }
     gesto = dedos.size ? { tipo: 'fin' } : null;
@@ -310,6 +311,7 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
     mover(posicion(ev.clientX, ev.clientY), true);
     enviar({ t: 'b', n: ev.button, d: 0 });
     apretados.delete(ev.button);
+    soltarFijos();
   });
 
   window.addEventListener('mousemove', (ev) => {
@@ -386,11 +388,50 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
   function igualarModificadores(ev, soloSoltar = false) {
     const altGr = ev.getModifierState('AltGraph');   // AltGr se ve como Ctrl + Alt: no cuenta como ninguno de los dos
     for (const [bandera, izquierda, derecha] of MODIFICADORES) {
-      const aca = ev[bandera] && !(altGr && (bandera === 'ctrlKey' || bandera === 'altKey'));
+      const aca = (ev[bandera] && !(altGr && (bandera === 'ctrlKey' || bandera === 'altKey'))) || fijos.has(izquierda);
       const alla = bajadas.has(izquierda) || bajadas.has(derecha);
       if (aca && !alla && !soloSoltar) bajarTecla(izquierda);
       else if (!aca && alla) { subirTecla(izquierda); subirTecla(derecha); }
     }
+  }
+
+  // ---------- Atajos ----------
+  // Ctrl y Shift se pueden dejar «fijados» desde la tira: quedan apretados allá hasta la próxima tecla o el próximo
+  // clic, y ahí se sueltan solos. Sirve en el celular, que no tiene esas teclas.
+  const fijos = new Set();
+  function soltarFijos() {
+    if (!fijos.size) return;
+    for (const codigo of fijos) subirTecla(codigo);
+    fijos.clear();
+    alCambiar();
+  }
+  function fijar(codigos) {
+    const eranLosMismos = codigos.length === fijos.size && codigos.every((c) => fijos.has(c));
+    for (const codigo of fijos) subirTecla(codigo);
+    fijos.clear();
+    if (!eranLosMismos) for (const codigo of codigos) { fijos.add(codigo); bajarTecla(codigo); }
+    alCambiar();
+  }
+  // Una combinación entera: baja las teclas en orden y las sube al revés.
+  function combinar(codigos) {
+    soltarFijos();
+    for (const codigo of codigos) { const tecla = TECLAS[codigo]; enviar({ t: 'k', vk: tecla[0], d: 1, e: tecla[1] }); }
+    for (const codigo of [...codigos].reverse()) { const tecla = TECLAS[codigo]; enviar({ t: 'k', vk: tecla[0], d: 0, e: tecla[1] }); }
+  }
+  const ATAJOS = {
+    tab: ['Tab'], esc: ['Escape'], alttab: ['AltLeft', 'Tab'], escritorio: ['MetaLeft', 'KeyD'], tareas: ['ControlLeft', 'ShiftLeft', 'Escape'],
+  };
+  function atajo(nombre) {
+    const codigos = ATAJOS[nombre];
+    if (!codigos) return;
+    // Tab y Esc solas respetan lo fijado (Ctrl+Tab, Shift+Tab); las combinaciones van limpias.
+    if (codigos.length === 1) { tocarTecla(codigos[0]); soltarFijos(); } else combinar(codigos);
+  }
+  // Con algo fijado, una letra del teclado en pantalla viaja como tecla y no como carácter: así Ctrl+C es Ctrl+C.
+  function teclaDe(letra) {
+    if (/^[a-z]$/i.test(letra)) return `Key${letra.toUpperCase()}`;
+    if (/^[0-9]$/.test(letra)) return `Digit${letra}`;
+    return letra === ' ' ? 'Space' : null;
   }
 
   // Una letra o un signo viaja como carácter: llega igual aunque la otra PC tenga otra distribución de teclado.
@@ -424,14 +465,14 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
     if (ev.key === 'AltGraph') { subirTecla('ControlLeft'); return; }
     if (esModificador.has(ev.code)) { bajarTecla(ev.code); return; }
     igualarModificadores(ev);
-    if (esTexto(ev)) enviar({ t: 'u', c: ev.key });
+    if (esTexto(ev) && !fijos.size) enviar({ t: 'u', c: ev.key });
     else bajarTecla(ev.code);
   });
 
   lienzo.addEventListener('keyup', (ev) => {
     ev.preventDefault();
     subirTecla(ev.code);
-    if (!esModificador.has(ev.code)) igualarModificadores(ev, true);
+    if (!esModificador.has(ev.code)) { soltarFijos(); igualarModificadores(ev, true); }
   });
 
   // Si la pantalla pierde el foco con una tecla apretada, se suelta todo allá: nada queda trabado.
@@ -439,6 +480,7 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
     if (bajadas.size || apretados.size) enviar({ t: 'soltar' });
     bajadas.clear();
     apretados.clear();
+    if (fijos.size) { fijos.clear(); alCambiar(); }
   }
   lienzo.addEventListener('blur', () => { soltarTodo(); alCambiar(); });
   lienzo.addEventListener('focus', alCambiar);
@@ -469,7 +511,9 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
     let comun = 0;
     while (comun < previo.length && comun < valor.length && previo[comun] === valor[comun]) comun++;
     for (let i = [...previo.slice(comun)].length; i > 0; i--) tocarTecla('Backspace');
-    mandarTexto(valor.slice(comun));
+    const nuevo = valor.slice(comun);
+    const comoTecla = fijos.size && [...nuevo].length === 1 ? teclaDe(nuevo) : null;
+    if (comoTecla) { tocarTecla(comoTecla); soltarFijos(); } else mandarTexto(nuevo);
     previo = valor;
     if (!ev.isComposing) reiniciarCampo();
   });
@@ -482,6 +526,7 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
     if (!SIN_TEXTO.has(ev.code) || ev.isComposing) return;
     ev.preventDefault();
     tocarTecla(ev.code);
+    soltarFijos();
   });
 
   function abrirTeclado() {
@@ -527,6 +572,7 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
     cerrarDecodificador();
     bajadas.clear();
     apretados.clear();
+    fijos.clear();
     dedos.clear();
     gesto = null;
     hayVideo = false;
@@ -534,7 +580,7 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
   }
 
   return {
-    alBinario, alTexto, empezar, terminar, soltarTodo, abrirTeclado, pegarAlla,
-    estado: () => ({ hayVideo, conEntrada, conFoco: document.activeElement === lienzo, zoom, ancho: lienzo.width, alto: lienzo.height, ...medidas }),
+    alBinario, alTexto, empezar, terminar, soltarTodo, abrirTeclado, pegarAlla, atajo, fijar,
+    estado: () => ({ hayVideo, conEntrada, conFoco: document.activeElement === lienzo, fijos: [...fijos], zoom, ancho: lienzo.width, alto: lienzo.height, ...medidas }),
   };
 }

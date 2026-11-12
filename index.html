@@ -59,9 +59,21 @@
       <span id="medidas" class="medidas"></span>
       <button id="pegar" type="button" class="boton" aria-label="Pegar" title="Pegar en la PC lo copiado en este equipo">📋</button>
       <button id="archivos" type="button" class="boton" aria-label="Archivos" title="Archivos">📁</button>
+      <button id="atajos" type="button" class="boton" aria-label="Atajos de teclado" title="Atajos de teclado" aria-pressed="false">Ctrl</button>
       <button id="teclado" type="button" class="boton" aria-label="Teclado" title="Teclado">⌨</button>
       <button id="salir" type="button" class="boton" aria-label="Salir" title="Salir">✕</button>
     </header>
+    <div id="tiraDeAtajos" class="tira" hidden>
+      <button type="button" data-atajo="tab">Tab</button>
+      <button type="button" data-atajo="esc">Esc</button>
+      <button type="button" data-fijar="ControlLeft" aria-pressed="false" title="Queda apretada hasta la próxima tecla o clic">Ctrl</button>
+      <button type="button" data-fijar="ShiftLeft" aria-pressed="false" title="Queda apretada hasta la próxima tecla o clic">Shift</button>
+      <button type="button" data-fijar="ControlLeft ShiftLeft" aria-pressed="false" title="Quedan apretadas hasta la próxima tecla o clic">Ctrl+Shift</button>
+      <button type="button" data-atajo="alttab">Alt+Tab</button>
+      <button type="button" data-atajo="escritorio" title="Muestra el escritorio (Windows+D)">Win+D</button>
+      <button type="button" data-atajo="tareas" title="Abre el Administrador de tareas (Ctrl+Shift+Esc)">Adm. de tareas</button>
+      <button id="capturar" type="button" title="Guarda en este equipo una imagen de la pantalla de la PC">📷 Captura</button>
+    </div>
     <div id="escena" class="escena">
       <canvas id="pantalla" tabindex="0" aria-label="Pantalla de la PC"></canvas>
       <p id="avisoMirando" class="aviso sobre" role="status"></p>
