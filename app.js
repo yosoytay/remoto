@@ -173,12 +173,26 @@ function irALaLista(texto = '', mal = false) {
   decir($('avisoLista'), texto, mal);
 }
 
+// Al abrir la página se le pregunta a la casa qué PC hay: así un nombre cambiado en casa se ve sin tener que entrar antes.
+// Si la casa no contesta, queda la lista guardada.
+async function ponerLaListaAlDia() {
+  const d = datos;
+  let r;
+  try { r = await pedirALaCasa(d, { t: 'lista' }); } catch { return; }
+  if (!r || r.t !== 'lista' || !Array.isArray(r.destinos) || datos !== d) return;
+  if (JSON.stringify(r.destinos) === JSON.stringify(d.destinos)) return;
+  d.destinos = r.destinos;
+  guardar('emparejado', d).catch(() => {});
+  // Solo se vuelve a dibujar si todavía no se eligió nada: no se le cambia la pantalla a quien ya está escribiendo el PIN.
+  if (!sesion && !elegido && !$('lista').hidden) irALaLista($('avisoLista').textContent);
+}
+
 function elegir(destino, boton) {
   if (sesion) return;
   for (const b of $('destinos').children) b.setAttribute('aria-pressed', String(b === boton));
   elegido = destino;
   if (pinEnMemoria) { conectar(destino, pinEnMemoria); return; }
-  $('paraQuien').textContent = `PIN para entrar a la ${destino.nombre}`;
+  $('paraQuien').textContent = `PIN para entrar a «${destino.nombre}»`;
   $('formularioPin').hidden = false;
   $('pin').value = '';
   $('pin').focus();
@@ -277,7 +291,7 @@ async function conectar(destino, pin, reintento = 0) {
     if (error.motivo === 'pin') {
       // Se vuelve a pedir el PIN para la misma PC.
       elegido = destino;
-      $('paraQuien').textContent = `PIN para entrar a la ${destino.nombre}`;
+      $('paraQuien').textContent = `PIN para entrar a «${destino.nombre}»`;
       $('formularioPin').hidden = false;
       $('pin').value = '';
       $('pin').focus();
@@ -383,7 +397,7 @@ async function arrancar() {
     mostrar('noSirve');
     return;
   }
-  if (datos) { irALaLista(); return; }
+  if (datos) { irALaLista(); ponerLaListaAlDia(); return; }
   $('nombreDelEquipo').value = /Android/i.test(navigator.userAgent) ? 'Celular' : /Windows/i.test(navigator.userAgent) ? 'Notebook' : 'Equipo';
   mostrar('emparejar');
 }
