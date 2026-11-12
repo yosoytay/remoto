@@ -233,3 +233,30 @@ button:disabled { opacity: 0.55; cursor: default; }
 /* En una tablet o un celular la tira muestra sus botones (Atrás, Inicio…) y no los atajos de Windows; en una PC, al revés. */
 .tira[data-tipo="android"] [data-atajo], .tira[data-tipo="android"] [data-fijar] { display: none; }
 .tira:not([data-tipo="android"]) [data-global] { display: none; }
+
+/* ---------- La lista de equipos: tarjetas con ícono, agrupadas por lo que son ---------- */
+#lista { max-width: 44rem; }
+#lista .destinos { display: block; }
+.grupo { margin: 22px 0 10px; color: var(--tenue); font-size: 0.78rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+.tarjetas { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.tarjetas .destino {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  height: auto;
+  min-height: 118px;
+  margin: 0;
+  padding: 14px;
+  border-radius: 14px;
+  transition: border-color 0.15s, transform 0.15s, background 0.15s;
+}
+.tarjetas .destino:hover { border-color: var(--color); background: #1b2026; transform: translateY(-1px); }
+.tarjetas .destino[aria-pressed="true"] { border-color: var(--color); box-shadow: 0 0 0 1px var(--color); }
+.tarjetas .destino[data-tipo="pc"] { --color: #4c8dd6; --fondoDelIcono: rgba(76, 141, 214, 0.16); }
+.tarjetas .destino[data-tipo="tablet"] { --color: #5ac08a; --fondoDelIcono: rgba(90, 192, 138, 0.16); }
+.tarjetas .destino[data-tipo="camara"] { --color: #e0a45a; --fondoDelIcono: rgba(224, 164, 90, 0.16); }
+.icono { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 8px; border-radius: 12px; background: var(--fondoDelIcono); color: var(--color); }
+.nombreDelDestino { font-weight: 600; font-size: 1rem; line-height: 1.25; overflow-wrap: anywhere; }
+.claseDelDestino { color: var(--tenue); font-size: 0.8rem; font-weight: 400; }

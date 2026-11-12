@@ -153,6 +153,13 @@ $('formularioEmparejar').addEventListener('submit', async (ev) => {
 });
 
 // ---------- Elegir la PC ----------
+// Los íconos son dibujos fijos de esta página (no vienen de ningún lado).
+const DIBUJO = (trazos) => `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${trazos}</svg>`;
+const GRUPOS = [
+  { tipo: 'pc', titulo: 'Computadoras', uno: 'PC', icono: DIBUJO('<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/>') },
+  { tipo: 'tablet', titulo: 'Tablets', uno: 'Tablet', icono: DIBUJO('<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M18.5 11v2"/>') },
+  { tipo: 'camara', titulo: 'Cámaras', uno: 'Celular cámara', icono: DIBUJO('<path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.2"/>') },
+];
 function irALaLista(texto = '', mal = false) {
   document.title = 'TayRemotoControl';
   elegido = null;
@@ -160,14 +167,35 @@ function irALaLista(texto = '', mal = false) {
   $('saludo').textContent = `Este equipo: «${datos.equipo.nombre}».`;
   const lista = $('destinos');
   lista.textContent = '';
-  for (const destino of datos.destinos) {
-    const boton = document.createElement('button');
-    boton.type = 'button';
-    boton.className = 'destino';
-    boton.textContent = destino.nombre;
-    boton.setAttribute('aria-pressed', 'false');
-    boton.addEventListener('click', () => elegir(destino, boton));
-    lista.append(boton);
+  // Agrupados por lo que son, cada uno con su ícono: se ve de un vistazo qué es una PC, una tablet o una cámara.
+  for (const grupo of GRUPOS) {
+    const suyos = datos.destinos.filter((d) => (GRUPOS.some((g) => g.tipo === d.tipo) ? d.tipo : 'pc') === grupo.tipo);
+    if (!suyos.length) continue;
+    const titulo = document.createElement('h2');
+    titulo.className = 'grupo';
+    titulo.textContent = grupo.titulo;
+    const caja = document.createElement('div');
+    caja.className = 'tarjetas';
+    for (const destino of suyos) {
+      const boton = document.createElement('button');
+      boton.type = 'button';
+      boton.className = 'destino';
+      boton.dataset.tipo = grupo.tipo;
+      const icono = document.createElement('span');
+      icono.className = 'icono';
+      icono.innerHTML = grupo.icono;
+      const nombre = document.createElement('span');
+      nombre.className = 'nombreDelDestino';
+      nombre.textContent = destino.nombre;
+      const clase = document.createElement('span');
+      clase.className = 'claseDelDestino';
+      clase.textContent = grupo.uno;
+      boton.append(icono, nombre, clase);
+      boton.setAttribute('aria-pressed', 'false');
+      boton.addEventListener('click', () => elegir(destino, boton));
+      caja.append(boton);
+    }
+    lista.append(titulo, caja);
   }
   mostrar('lista');
   decir($('avisoLista'), texto, mal);
@@ -189,7 +217,7 @@ async function ponerLaListaAlDia() {
 
 function elegir(destino, boton) {
   if (sesion) return;
-  for (const b of $('destinos').children) b.setAttribute('aria-pressed', String(b === boton));
+  for (const b of $('destinos').querySelectorAll('.destino')) b.setAttribute('aria-pressed', String(b === boton));
   elegido = destino;
   if (pinEnMemoria) { conectar(destino, pinEnMemoria); return; }
   $('paraQuien').textContent = `PIN para entrar a «${destino.nombre}»`;
