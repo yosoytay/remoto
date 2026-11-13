@@ -59,6 +59,7 @@
       <span id="medidas" class="medidas"></span>
       <button id="pegar" type="button" class="boton" aria-label="Pegar" title="Pegar en la PC lo copiado en este equipo">📋</button>
       <button id="archivos" type="button" class="boton" aria-label="Archivos" title="Archivos">📁</button>
+      <button id="reunion" type="button" class="boton" aria-label="Reunión" title="Mandar el audio de una reunión" hidden>🎙</button>
       <button id="atajos" type="button" class="boton" aria-label="Atajos de teclado" title="Atajos de teclado" aria-pressed="false">Ctrl</button>
       <button id="teclado" type="button" class="boton" aria-label="Teclado" title="Teclado">⌨</button>
       <button id="salir" type="button" class="boton" aria-label="Salir" title="Salir">✕</button>
@@ -94,6 +95,23 @@
       <p class="nota">Lo que dejes en «Archivos remotos\Para llevar» de esa PC aparece acá. Tocá uno para bajarlo.</p>
       <div id="listaArchivos" class="destinos"></div>
       <p class="pie"><button id="actualizarArchivos" type="button" class="enlace">Actualizar la lista</button></p>
+    </section>
+    <section id="panelReunion" class="panel" hidden>
+      <header><strong>Audio de una reunión</strong><button id="cerrarReunion" type="button" class="boton" aria-label="Cerrar">✕</button></header>
+      <form id="formularioReunion" autocomplete="off">
+        <label>Tema
+          <input id="temaReunion" maxlength="60" autocorrect="off" spellcheck="false" required>
+        </label>
+        <label>Fecha de la reunión
+          <input id="fechaReunion" type="date" required>
+        </label>
+        <label>Audio
+          <input id="audioReunion" type="file" accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.oga,.opus,.webm,.mp4,.3gp,.amr,.flac,.wma" required>
+        </label>
+        <button type="submit">Mandar</button>
+      </form>
+      <p id="avisoReunion" class="aviso" role="status"></p>
+      <p class="nota">Dejá esta pantalla abierta hasta que termine de subir.</p>
     </section>
     <textarea id="campo" class="campo" aria-hidden="true" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
   </div>

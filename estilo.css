@@ -260,3 +260,18 @@ button:disabled { opacity: 0.55; cursor: default; }
 .icono { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 8px; border-radius: 12px; background: var(--fondoDelIcono); color: var(--color); }
 .nombreDelDestino { font-weight: 600; font-size: 1rem; line-height: 1.25; overflow-wrap: anywhere; }
 .claseDelDestino { color: var(--tenue); font-size: 0.8rem; font-weight: 400; }
+
+/* El panel del audio de una reunión. */
+#panelReunion input[type="file"] { padding: 8px; font-size: 0.85rem; }
+#panelReunion form button[type="submit"] { margin-top: 4px; }
+
+/* En un celular la barra tiene muchos botones: se achican, y del estado queda solo el punto de color. */
+@media (max-width: 520px) {
+  .barra { gap: 4px 5px; padding-left: max(8px, env(safe-area-inset-left)); padding-right: max(6px, env(safe-area-inset-right)); }
+  .barra .nombre { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .barra .estado { flex: none; margin-right: auto; font-size: 0; }
+  .barra .estado::before { margin-right: 0; }
+  .barra .medidas { display: none; }
+  .barra .boton { min-width: 36px; padding: 0 5px; }
+  .medidas + .boton { margin-left: 0; }
+}

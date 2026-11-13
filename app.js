@@ -289,7 +289,10 @@ async function conectar(destino, pin, reintento = 0) {
     else if (m.t === 'chau') s.chau = m.motivo;
     else if (m.t === 'inactividad') { if (esperaInactividad) { esperaInactividad(m.ms); esperaInactividad = null; } }
     else if (m.t === 'porta') alPortapapelesDeAlla(m.c);
-    else if (!alMensajeDeArchivos(m)) visor.alTexto(m);
+    else if (!alMensajeDeArchivos(m)) {
+      if (m.t === 'estado') $('reunion').hidden = !m.reunion;   // solo la PC que transcribe lo ofrece
+      visor.alTexto(m);
+    }
   };
   try {
     await pc.setLocalDescription(await pc.createOffer());
@@ -453,6 +456,9 @@ function abrirArchivos() {
 function soltarArchivos() {
   subida = null;
   bajada = null;
+  soltarLaPantalla();
+  $('reunion').hidden = true;
+  $('panelReunion').hidden = true;
   $('panelArchivos').hidden = true;
   avisarArchivos('');
   $('listaArchivos').textContent = '';
@@ -462,7 +468,7 @@ function mandarArchivo(archivo) {
   if (!sesion || !archivo) return;
   $('panelArchivos').hidden = false;
   if (subida) { avisarArchivos('Esperá a que termine el que se está mandando.', true); return; }
-  subida = { archivo, canal: sesion.canal, enviado: 0, confirmado: 0, aceptada: false, ocupado: false };
+  subida = { archivo, canal: sesion.canal, enviado: 0, confirmado: 0, aceptada: false, ocupado: false, avisar: avisarArchivos };
   avisarArchivos(`Mandando «${archivo.name}» (${tamano(archivo.size)})…`);
   enviar({ t: 'sube', n: archivo.name, tam: archivo.size });
 }
@@ -480,7 +486,7 @@ async function seguirSubida() {
       s.enviado += trozo.byteLength;
     }
   } catch {
-    if (subida === s) { subida = null; enviar({ t: 'sube-cancelar' }); avisarArchivos('No se pudo leer el archivo en este equipo.', true); }
+    if (subida === s) { subida = null; soltarLaPantalla(); enviar({ t: 'sube-cancelar' }); s.avisar('No se pudo leer el archivo en este equipo.', true); }
   } finally { s.ocupado = false; }
 }
 
@@ -539,6 +545,28 @@ function alMensajeDeArchivos(m) {
       return true;
     case 'sube-listo': subida = null; avisarArchivos(`Listo: «${m.n}» quedó en «Recibidos» de esa PC.`); return true;
     case 'sube-no': subida = null; avisarArchivos(m.texto || 'Esa PC no aceptó el archivo.', true); return true;
+    // El audio de una reunión viaja igual que un archivo, pero va a otra carpeta de la PC y con otro nombre.
+    case 'reunion-si': if (subida) { subida.aceptada = true; seguirSubida(); } return true;
+    case 'reunion-va':
+      if (subida && Number.isSafeInteger(m.n)) {
+        subida.confirmado = m.n;
+        avisarReunion(`Subiendo: ${porciento(m.n, subida.archivo.size)} % de ${tamano(subida.archivo.size)}`);
+        seguirSubida();
+      }
+      return true;
+    case 'reunion-listo':
+      subida = null;
+      soltarLaPantalla();
+      $('formularioReunion').reset();
+      $('fechaReunion').value = hoy();
+      avisarReunion('Llegó: se está transcribiendo en la PC.');
+      return true;
+    case 'reunion-no':
+      subida = null;
+      soltarLaPantalla();
+      avisarReunion(m.texto || 'La PC no aceptó el audio.', true);
+      if (m.motivo === 'repetida' || m.motivo === 'tema') $('temaReunion').focus();
+      return true;
     case 'baja-si': bajada = { nombre: String(m.n), tam: Number(m.tam) || 0, partes: [], recibido: 0, avisado: 0 }; avisarArchivos(`Bajando «${m.n}»…`); return true;
     case 'baja-listo':
       if (bajada) {
@@ -552,6 +580,39 @@ function alMensajeDeArchivos(m) {
     default: return false;
   }
 }
+
+// ---------- El audio de una reunión ----------
+// Solo aparece al mirar la PC que transcribe. Se manda con tema y fecha; la PC arma el nombre y avisa si ya existe.
+const avisarReunion = (texto, malo = false) => decir($('avisoReunion'), texto, malo);
+const hoy = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+// Mientras sube, se le pide al equipo que no apague la pantalla: en un celular, si se apaga, la subida se corta.
+let pantallaDespierta = null;
+async function mantenerLaPantalla() {
+  try { if (navigator.wakeLock && !pantallaDespierta) pantallaDespierta = await navigator.wakeLock.request('screen'); } catch {}
+}
+function soltarLaPantalla() {
+  if (pantallaDespierta) { pantallaDespierta.release().catch(() => {}); pantallaDespierta = null; }
+}
+
+$('reunion').addEventListener('click', () => {
+  const panel = $('panelReunion');
+  panel.hidden = !panel.hidden;
+  if (!panel.hidden) { $('panelArchivos').hidden = true; if (!$('fechaReunion').value) $('fechaReunion').value = hoy(); }
+});
+$('cerrarReunion').addEventListener('click', () => { $('panelReunion').hidden = true; });
+$('formularioReunion').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  if (!sesion) return;
+  if (subida) { avisarReunion('Esperá a que termine lo que se está mandando.', true); return; }
+  const archivo = $('audioReunion').files[0];
+  const tema = $('temaReunion').value.trim();
+  const fecha = $('fechaReunion').value;
+  if (!archivo || !tema || !fecha) { avisarReunion('Faltan el tema, la fecha o el audio.', true); return; }
+  subida = { archivo, canal: sesion.canal, enviado: 0, confirmado: 0, aceptada: false, ocupado: false, avisar: avisarReunion };
+  avisarReunion(`Mandando el audio (${tamano(archivo.size)})…`);
+  mantenerLaPantalla();
+  enviar({ t: 'reunion', tema, fecha, n: archivo.name, tam: archivo.size });
+});
 
 $('archivos').addEventListener('click', () => { if ($('panelArchivos').hidden) abrirArchivos(); else $('panelArchivos').hidden = true; });
 $('cerrarArchivos').addEventListener('click', () => { $('panelArchivos').hidden = true; });
