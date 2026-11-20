@@ -194,9 +194,10 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
   window.addEventListener('resize', acomodar);
 
   // ---------- El dedo ----------
-  // En una PC: un toque hace clic donde tocás; dos toques seguidos, doble clic. Mover un dedo mueve el puntero desde
-  // donde está, siguiendo la mano, sin apretar ningún botón (no arrastra ni selecciona); el toque que sigue hace clic
-  // donde quedó el puntero. Mantener apretado sin mover (vibra) y soltar: clic derecho.
+  // En una PC, el dedo es un panel táctil: el puntero nunca salta adonde está el dedo. Mover un dedo mueve el puntero
+  // desde donde está, siguiendo la mano, sin apretar ningún botón (no arrastra ni selecciona). Un toque hace clic donde
+  // está el puntero; dos toques seguidos, doble clic. Mantener apretado sin mover (vibra) y soltar: clic derecho.
+  // Todo eso vale en cualquier parte de la pantalla, no solo sobre la imagen.
   // En un aparato Android, que no tiene puntero: un dedo arrastra, y mantener apretado es Atrás.
   // Dos dedos: separarlos o juntarlos acerca o aleja la vista; deslizarlos juntos desliza la PC (si la vista está
   // acercada, primero corre la vista y, cuando llega al borde, desliza la PC). Los dedos valen en toda la zona de la
@@ -214,8 +215,8 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
     dedos.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
     clearTimeout(relojDeToqueLargo);
     if (dedos.size === 1) {
-      // Un dedo solo que cae fuera de la imagen no hace clic: solo sirve para empezar un gesto de dos dedos.
-      const g = { tipo: 'uno', x0: ev.clientX, y0: ev.clientY, movido: false, arrastrando: false, largo: false, fuera: ev.target !== lienzo };
+      // En un aparato Android, un dedo solo que cae fuera de la imagen no hace nada: ahí el toque va donde está el dedo.
+      const g = { tipo: 'uno', x0: ev.clientX, y0: ev.clientY, movido: false, arrastrando: false, largo: false, fuera: sinPuntero && ev.target !== lienzo };
       gesto = g;
       relojDeToqueLargo = setTimeout(() => {
         if (gesto !== g || g.movido || g.fuera) return;
@@ -297,7 +298,8 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
       const sobraX = dx - hecho.x;
       const sobraY = dy - hecho.y;
       if (!sobraX && !sobraY) return;
-      if (!gesto.ubicada) { gesto.ubicada = true; mover(posicion(cx, cy), true); }   // la rueda actúa donde están los dedos
+      // En un aparato Android, la rueda actúa donde están los dedos; en una PC, donde está el puntero (no salta).
+      if (sinPuntero && !gesto.ubicada) { gesto.ubicada = true; mover(posicion(cx, cy), true); }
       // Tres centímetros de dedo, más o menos, son un paso de rueda. El contenido sigue al dedo.
       gesto.resto.y += sobraY * 4;
       gesto.resto.x -= sobraX * 4;
@@ -326,15 +328,14 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
         despacharRelativo();
         ultimoRelativo = performance.now();
       } else if (g.largo && !g.movido && !g.hecho && !g.fuera && ev.type === 'pointerup') {
-        // Mantener apretado y soltar sin mover: clic derecho donde estaba el dedo.
-        mover(posicion(g.x0, g.y0), true);
+        // Mantener apretado y soltar sin mover: clic derecho donde está el puntero.
         enviar({ t: 'b', n: 2, d: 1 });
         enviar({ t: 'b', n: 2, d: 0 });
         soltarFijos();
-      } else if (!g.largo && !g.movido && !g.fuera && ev.type === 'pointerup' && !sinPuntero && performance.now() - ultimoRelativo < 3000) {
-        // Recién se movió el puntero como con un panel táctil: el toque hace clic donde quedó el puntero, sin moverlo.
+      } else if (!g.largo && !g.movido && ev.type === 'pointerup' && !sinPuntero) {
+        // En una PC el toque hace clic donde está el puntero, sin moverlo. Dos toques seguidos caen en el mismo lugar:
+        // Windows los toma como doble clic.
         ultimoRelativo = performance.now();
-        ultimoToque = null;
         enviar({ t: 'b', n: 0, d: 1 });
         enviar({ t: 'b', n: 0, d: 0 });
         soltarFijos();
