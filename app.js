@@ -289,6 +289,7 @@ async function conectar(destino, pin, reintento = 0) {
     else if (m.t === 'chau') s.chau = m.motivo;
     else if (m.t === 'inactividad') { if (esperaInactividad) { esperaInactividad(m.ms); esperaInactividad = null; } }
     else if (m.t === 'porta') alPortapapelesDeAlla(m.c);
+    else if (m.t === 'porta-otro') allaCopiaronOtraCosa();
     else if (!alMensajeDeArchivos(m)) {
       if (m.t === 'estado') $('reunion').hidden = !m.reunion;   // solo la PC que transcribe lo ofrece
       visor.alTexto(m);
@@ -347,6 +348,7 @@ function alCerrarse(s) {
   acomodarSegunElTipo(false);
   soltarArchivos();
   portaPendiente = null;
+  yaConocido = null;
   try { s.pc.close(); } catch {}
   olvidarPinEnUnRato();
   const terminar = (texto, mal) => { visor.terminar(); irALaLista(texto, mal); };
@@ -410,6 +412,9 @@ const visor = crearVisor({
 // Solo pasa mientras se está mirando esa PC, y no queda anotado en ningún lado.
 const LARGO_DEL_PORTAPAPELES = 50000;
 let portaPendiente = null;
+// El último texto que ya está en los dos lados (vino de allá o se mandó desde acá). Al pegar, solo viaja lo de acá si
+// es distinto: si no, se pisaría lo que allá se copió después, como un recorte de pantalla.
+let yaConocido = null;
 
 function ponerLoPendiente() {
   if (portaPendiente === null || !navigator.clipboard) return;
@@ -420,8 +425,18 @@ function ponerLoPendiente() {
 function alPortapapelesDeAlla(texto) {
   if (typeof texto !== 'string' || !texto || texto.length > LARGO_DEL_PORTAPAPELES) return;
   portaPendiente = texto;
+  yaConocido = texto;
   ponerLoPendiente();
 }
+
+// Allá copiaron algo que no es texto (un recorte, una imagen, archivos): lo que hay acá ahora ya no es lo último.
+async function allaCopiaronOtraCosa() {
+  portaPendiente = null;
+  yaConocido = ALLA_ES_MAS_NUEVO;
+  if (!navigator.clipboard || !navigator.clipboard.readText) return;
+  try { yaConocido = await navigator.clipboard.readText(); } catch {}   // sin la página al frente no se puede leer
+}
+const ALLA_ES_MAS_NUEVO = Symbol('allá es más nuevo');
 // El navegador solo deja escribir el portapapeles con la página en uso: si no pudo, se reintenta al primer toque.
 document.addEventListener('pointerdown', ponerLoPendiente, true);
 
@@ -429,8 +444,10 @@ async function mandarLoCopiado() {
   if (!sesion || !navigator.clipboard || !navigator.clipboard.readText) return;
   let texto = '';
   try { texto = await navigator.clipboard.readText(); } catch { return; }   // sin permiso: allá se pega lo que allá hubiera
-  if (!texto) return;
+  if (yaConocido === ALLA_ES_MAS_NUEVO) { yaConocido = texto; return; }   // no se pudo ver qué había acá: gana lo de allá
+  if (!texto || texto === yaConocido) return;   // allá ya está esto, o allá copiaron algo después
   if (texto.length > LARGO_DEL_PORTAPAPELES) { decir($('avisoMirando'), 'Lo copiado es demasiado largo para pasarlo.', true); setTimeout(() => decir($('avisoMirando'), ''), 4000); return; }
+  yaConocido = texto;
   enviar({ t: 'porta', c: texto });
 }
 
