@@ -629,6 +629,7 @@ $('escena').addEventListener('drop', (ev) => { ev.preventDefault(); if (ev.dataT
 function acomodarSegunElTipo(esAndroid) {
   const tira = $('tiraDeAtajos');
   tira.dataset.tipo = esAndroid ? 'android' : 'pc';
+  visor.ponerSinPuntero(esAndroid);
   for (const id of ['pegar', 'archivos', 'teclado']) $(id).hidden = esAndroid;
   if (esAndroid) { tira.hidden = false; $('atajos').setAttribute('aria-pressed', 'true'); $('panelArchivos').hidden = true; }
 }

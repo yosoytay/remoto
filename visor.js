@@ -121,6 +121,29 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
     else if (!relojDeMovimiento) relojDeMovimiento = setTimeout(despacharMovimiento, falta);
   }
 
+  // ---------- Mover el puntero desde donde está (como un panel táctil) ----------
+  // Se manda cuánto se movió el dedo, como parte del ancho y el alto de la imagen: la PC mueve su puntero desde donde
+  // lo tiene, aunque alguien lo haya movido allá. Como mucho un mensaje cada 16 milisegundos.
+  let relativoPendiente = { x: 0, y: 0 };
+  let relojRelativo = 0;
+  let ultimoRelativo = -10000;   // cuándo terminó el último movimiento así: el toque que sigue hace clic ahí
+  let sinPuntero = false;        // un aparato Android no tiene puntero
+
+  function despacharRelativo() {
+    clearTimeout(relojRelativo);
+    relojRelativo = 0;
+    const r = lienzo.getBoundingClientRect();
+    if (!r.width || !r.height || (!relativoPendiente.x && !relativoPendiente.y)) return;
+    enviar({ t: 'mr', dx: +(relativoPendiente.x / r.width).toFixed(5), dy: +(relativoPendiente.y / r.height).toFixed(5) });
+    relativoPendiente = { x: 0, y: 0 };
+  }
+
+  function moverRelativo(dx, dy) {
+    relativoPendiente.x += dx;
+    relativoPendiente.y += dy;
+    if (!relojRelativo) relojRelativo = setTimeout(despacharRelativo, 16);
+  }
+
   // ---------- Acercar y correr la vista (solo acá: la otra PC no se entera) ----------
   let zoom = 1;
   let corrX = 0;
@@ -157,18 +180,27 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
     acomodar();
   }
 
+  // Devuelve cuánto se corrió de verdad: en el borde de la imagen ya no corre más.
   function correr(dx, dy) {
-    if (zoom <= 1.001) return;
+    if (zoom <= 1.001) return { x: 0, y: 0 };
+    const antesX = corrX;
+    const antesY = corrY;
     corrX += dx;
     corrY += dy;
     acomodar();
+    return { x: corrX - antesX, y: corrY - antesY };
   }
 
   window.addEventListener('resize', acomodar);
 
   // ---------- El dedo ----------
-  // Un toque: clic. Dos toques seguidos: doble clic. Toque largo: clic derecho. Arrastrar un dedo: arrastrar.
-  // Dos dedos: separarlos acerca la vista; moverlos juntos gira la rueda (o corre la vista, si está acercada).
+  // En una PC: un toque hace clic donde tocás; dos toques seguidos, doble clic. Mover un dedo mueve el puntero desde
+  // donde está, siguiendo la mano, sin apretar ningún botón (no arrastra ni selecciona); el toque que sigue hace clic
+  // donde quedó el puntero. Mantener apretado sin mover (vibra) y soltar: clic derecho.
+  // En un aparato Android, que no tiene puntero: un dedo arrastra, y mantener apretado es Atrás.
+  // Dos dedos: separarlos o juntarlos acerca o aleja la vista; deslizarlos juntos desliza la PC (si la vista está
+  // acercada, primero corre la vista y, cuando llega al borde, desliza la PC). Los dedos valen en toda la zona de la
+  // pantalla, no solo sobre la imagen: en un celular vertical la imagen es una franja finita.
   const dedos = new Map();
   let gesto = null;
   let relojDeToqueLargo = 0;
@@ -178,20 +210,24 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
   function alTocar(ev) {
     ev.preventDefault();
     ultimoDedo = performance.now();
-    try { lienzo.setPointerCapture(ev.pointerId); } catch {}
+    try { escena.setPointerCapture(ev.pointerId); } catch {}
     dedos.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
     clearTimeout(relojDeToqueLargo);
     if (dedos.size === 1) {
-      const g = { tipo: 'uno', x0: ev.clientX, y0: ev.clientY, movido: false, arrastrando: false, largo: false };
+      // Un dedo solo que cae fuera de la imagen no hace clic: solo sirve para empezar un gesto de dos dedos.
+      const g = { tipo: 'uno', x0: ev.clientX, y0: ev.clientY, movido: false, arrastrando: false, largo: false, fuera: ev.target !== lienzo };
       gesto = g;
       relojDeToqueLargo = setTimeout(() => {
-        if (gesto !== g || g.movido) return;
+        if (gesto !== g || g.movido || g.fuera) return;
         g.largo = true;
-        mover(posicion(g.x0, g.y0), true);
-        enviar({ t: 'b', n: 2, d: 1 });
-        enviar({ t: 'b', n: 2, d: 0 });
         if (navigator.vibrate) navigator.vibrate(15);
-      }, 550);
+        if (sinPuntero) {
+          mover(posicion(g.x0, g.y0), true);
+          enviar({ t: 'b', n: 2, d: 1 });
+          enviar({ t: 'b', n: 2, d: 0 });
+          g.hecho = true;
+        }
+      }, 450);
     } else if (dedos.size === 2) {
       if (gesto && gesto.tipo === 'uno' && gesto.arrastrando) enviar({ t: 'b', n: 0, d: 0 });
       const [a, b] = [...dedos.values()];
@@ -215,7 +251,10 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
         if (Math.hypot(ev.clientX - gesto.x0, ev.clientY - gesto.y0) < 10) return;
         gesto.movido = true;
         clearTimeout(relojDeToqueLargo);
-        if (!gesto.largo) {
+        // En una PC, mover un dedo mueve el puntero desde donde está, sin apretar nada (como un panel táctil).
+        // En un aparato Android, que no tiene puntero, arrastra (para deslizar listas y pantallas).
+        if (!sinPuntero) { gesto.relativo = true; gesto.ux = gesto.x0; gesto.uy = gesto.y0; }
+        else if (!gesto.largo && !gesto.fuera) {
           // Arrastrar: el botón izquierdo queda apretado mientras el dedo se mueve.
           gesto.arrastrando = true;
           mover(posicion(gesto.x0, gesto.y0), true);
@@ -223,6 +262,11 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
         }
       }
       if (gesto.arrastrando) mover(posicion(ev.clientX, ev.clientY), false);
+      else if (gesto.relativo) {
+        moverRelativo(ev.clientX - gesto.ux, ev.clientY - gesto.uy);
+        gesto.ux = ev.clientX;
+        gesto.uy = ev.clientY;
+      }
       return;
     }
     if (gesto.tipo !== 'dos' || dedos.size !== 2) return;
@@ -232,10 +276,13 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
     const cy = (a.y + b.y) / 2;
     if (!gesto.modo) {
       if (Math.abs(dist - gesto.dist0) > 28) gesto.modo = 'acercar';
-      else if (Math.hypot(cx - gesto.cx0, cy - gesto.cy0) > 12) {
-        gesto.modo = zoom > 1.02 ? 'correr' : 'rueda';
-        if (gesto.modo === 'rueda') mover(posicion(gesto.cx0, gesto.cy0), true);   // la rueda actúa donde están los dedos
-      } else return;
+      else if (Math.hypot(cx - gesto.cx0, cy - gesto.cy0) > 12) { gesto.modo = 'deslizar'; gesto.distAlDeslizar = dist; }
+      else return;
+    } else if (gesto.modo === 'deslizar' && Math.abs(dist - gesto.distAlDeslizar) > 60) {
+      // Empezó deslizando y después abrió o cerró los dedos: desde acá acerca o aleja.
+      gesto.modo = 'acercar';
+      gesto.dist0 = dist;
+      gesto.zoom0 = zoom;
     }
     const dx = cx - gesto.cx;
     const dy = cy - gesto.cy;
@@ -244,12 +291,16 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
     if (gesto.modo === 'acercar') {
       acercar(cx, cy, gesto.zoom0 * dist / gesto.dist0);
       correr(dx, dy);
-    } else if (gesto.modo === 'correr') {
-      correr(dx, dy);
     } else {
+      // Si la vista está acercada, primero se corre la vista; lo que sobra (ya en el borde) desliza la PC.
+      const hecho = correr(dx, dy);
+      const sobraX = dx - hecho.x;
+      const sobraY = dy - hecho.y;
+      if (!sobraX && !sobraY) return;
+      if (!gesto.ubicada) { gesto.ubicada = true; mover(posicion(cx, cy), true); }   // la rueda actúa donde están los dedos
       // Tres centímetros de dedo, más o menos, son un paso de rueda. El contenido sigue al dedo.
-      gesto.resto.y += dy * 4;
-      gesto.resto.x -= dx * 4;
+      gesto.resto.y += sobraY * 4;
+      gesto.resto.x -= sobraX * 4;
       const pasosY = Math.trunc(gesto.resto.y / 120) * 120;
       const pasosX = Math.trunc(gesto.resto.x / 120) * 120;
       if (pasosY || pasosX) {
@@ -271,7 +322,23 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
       if (g.arrastrando) {
         mover(posicion(ev.clientX, ev.clientY), true);
         enviar({ t: 'b', n: 0, d: 0 });
-      } else if (!g.largo && !g.movido && ev.type === 'pointerup') {
+      } else if (g.relativo) {
+        despacharRelativo();
+        ultimoRelativo = performance.now();
+      } else if (g.largo && !g.movido && !g.hecho && !g.fuera && ev.type === 'pointerup') {
+        // Mantener apretado y soltar sin mover: clic derecho donde estaba el dedo.
+        mover(posicion(g.x0, g.y0), true);
+        enviar({ t: 'b', n: 2, d: 1 });
+        enviar({ t: 'b', n: 2, d: 0 });
+        soltarFijos();
+      } else if (!g.largo && !g.movido && !g.fuera && ev.type === 'pointerup' && !sinPuntero && performance.now() - ultimoRelativo < 3000) {
+        // Recién se movió el puntero como con un panel táctil: el toque hace clic donde quedó el puntero, sin moverlo.
+        ultimoRelativo = performance.now();
+        ultimoToque = null;
+        enviar({ t: 'b', n: 0, d: 1 });
+        enviar({ t: 'b', n: 0, d: 0 });
+        soltarFijos();
+      } else if (!g.largo && !g.movido && !g.fuera && ev.type === 'pointerup') {
         // El segundo toque de un doble toque va al punto exacto del primero: Windows pide que coincidan.
         const ahora = performance.now();
         const repetido = ultimoToque && ahora - ultimoToque.t < 400 && Math.hypot(g.x0 - ultimoToque.x, g.y0 - ultimoToque.y) < 32;
@@ -286,10 +353,10 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
     gesto = dedos.size ? { tipo: 'fin' } : null;
   }
 
-  lienzo.addEventListener('pointerdown', (ev) => { if (ev.pointerType === 'touch') alTocar(ev); });
-  lienzo.addEventListener('pointermove', (ev) => { if (ev.pointerType === 'touch') alMoverElDedo(ev); });
-  lienzo.addEventListener('pointerup', (ev) => { if (ev.pointerType === 'touch') alLevantar(ev); });
-  lienzo.addEventListener('pointercancel', (ev) => { if (ev.pointerType === 'touch') alLevantar(ev); });
+  escena.addEventListener('pointerdown', (ev) => { if (ev.pointerType === 'touch') alTocar(ev); });
+  escena.addEventListener('pointermove', (ev) => { if (ev.pointerType === 'touch') alMoverElDedo(ev); });
+  escena.addEventListener('pointerup', (ev) => { if (ev.pointerType === 'touch') alLevantar(ev); });
+  escena.addEventListener('pointercancel', (ev) => { if (ev.pointerType === 'touch') alLevantar(ev); });
 
   // ---------- El mouse ----------
   const apretados = new Set();
@@ -582,6 +649,7 @@ export function crearVisor({ lienzo, escena, campo, enviar, alCambiar, alAviso, 
 
   return {
     alBinario, alTexto, empezar, terminar, soltarTodo, abrirTeclado, pegarAlla, atajo, fijar,
+    ponerSinPuntero: (valor) => { sinPuntero = !!valor; },
     estado: () => ({ hayVideo, conEntrada, conFoco: document.activeElement === lienzo, fijos: [...fijos], zoom, ancho: lienzo.width, alto: lienzo.height, ...medidas }),
   };
 }
